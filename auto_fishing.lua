@@ -21,19 +21,14 @@ local Humanoid = Character:WaitForChild("Humanoid")
 -- Settings
 local Settings = {
     AutoCast = false,
-    PerfectCast = false,
-    AutoReel = false,
-    CastDelay = 0.5,
-    ReelSpeed = 0.01,
-    PerfectTiming = 0.1,
-    AutoShake = false,
-    ShakeSpeed = 0.05
+    CastDelay = 0.6,      -- Durasi mouse hold saat cast (hold duration)
+    ReelTiming = 0.6,     -- Delay sebelum klik reel
+    HookTiming = 0.1      -- Interval spam click untuk hook minigame
 }
 
 -- State tracking
 local isFishing = false
 local isMinigameActive = false
-local fishHooked = false
 local currentRod = nil
 
 -- Create GUI
@@ -106,116 +101,222 @@ local function castRod()
     
     print("🎣 Attempting to cast...")
     
-    -- Method 1: Fire ChargeFishingRod remote
-    local chargeFishingRod = ReplicatedStorage:FindFirstChild("Packages", true)
-    if chargeFishingRod then
-        chargeFishingRod = chargeFishingRod:FindFirstChild("ChargeFishingRod", true)
+    -- Method 1: Fire ChargeFishingRod remote directly (most reliable)
+    local packages = ReplicatedStorage:FindFirstChild("Packages", true)
+    if packages then
+        local chargeFishingRod = packages:FindFirstChild("ChargeFishingRod", true)
         if chargeFishingRod and chargeFishingRod:IsA("RemoteFunction") then
-            pcall(function()
+            local success = pcall(function()
                 chargeFishingRod:InvokeServer()
                 print("✅ ChargeFishingRod invoked!")
             end)
+            if success then
+                isFishing = true
+                print("🎣 Cast rod!")
+                return
+            end
         end
     end
     
-    -- Method 2: Click mobile fishing button (works for both mobile and PC)
-    local mobileButton = LocalPlayer.PlayerGui:FindFirstChild("HUD")
-    if mobileButton then
-        mobileButton = mobileButton:FindFirstChild("MobileFishingButton", true)
-        if mobileButton and mobileButton:IsA("GuiButton") then
-            pcall(function()
-                for _, connection in pairs(getconnections(mobileButton.MouseButton1Click)) do
-                    connection:Fire()
-                end
-                print("✅ Mobile fishing button clicked!")
-            end)
-        end
-    end
-    
-    -- Method 3: Mouse click simulation as fallback
+    -- Method 2: Hold mouse for 0.6 seconds then release (charge casting)
     pcall(function()
         mouse1press()
-        wait(0.1)
+        print("🖱️ Holding mouse for 0.6 seconds...")
+        task.wait(0.6)
         mouse1release()
-        print("✅ Simulated mouse click")
+        print("✅ Mouse released - cast!")
     end)
     
     print("🎣 Cast rod!")
     isFishing = true
 end
 
-local function handlePerfectCast()
-    if not Settings.PerfectCast then return end
-    
-    -- Look for fishing minigame
-    local fishingGui = LocalPlayer.PlayerGui:FindFirstChild("Fishing")
-    if not fishingGui then return end
-    
-    local minigame = fishingGui:FindFirstChild("Main", true)
-    if minigame then
-        minigame = minigame:FindFirstChild("Minigame", true)
-        if minigame and minigame.Visible then
-            print("🎮 Minigame detected!")
-            
-            -- Wait for perfect timing
-            wait(Settings.PerfectTiming)
-            
-            -- Release click for perfect cast
-            pcall(function()
-                mouse1release()
-                print("✨ Perfect cast attempted!")
+local reelMinigameDetectedTime = 0
+local reelDone = false
+local lastHookClickTime = 0
+local wasMinigameActive = false
+local minigameActiveFromRemote = false -- Track if minigame triggered from remote
+
+-- Listen to RequestFishingMinigameStarted (UNIVERSAL - no hook needed!)
+local function setupRemoteListener()
+    local packages = ReplicatedStorage:FindFirstChild("Packages", true)
+    if packages then
+        -- Method 1: Listen to FishingMinigameChanged event
+        local minigameChangedEvent = packages:FindFirstChild("FishingMinigameChanged", true)
+        if minigameChangedEvent and minigameChangedEvent:IsA("RemoteEvent") then
+            minigameChangedEvent.OnClientEvent:Connect(function(minigameType)
+                minigameActiveFromRemote = true
+                print("✅ FishingMinigameChanged event fired - Type:", tostring(minigameType))
             end)
+            print("🎣 Listening to FishingMinigameChanged event")
+        end
+        
+        -- Method 2: Intercept RequestFishingMinigameStarted RemoteFunction (NO HOOK!)
+        local minigameRemote = packages:FindFirstChild("RequestFishingMinigameStarted", true)
+        if minigameRemote and minigameRemote:IsA("RemoteFunction") then
+            -- Store original function
+            local originalFunc = minigameRemote.OnClientInvoke
             
-            return
+            -- Wrap it to detect when it's called
+            minigameRemote.OnClientInvoke = function(...)
+                minigameActiveFromRemote = true
+                print("✅ RequestFishingMinigameStarted detected!")
+                
+                -- Call original if it exists
+                if originalFunc then
+                    return originalFunc(...)
+                end
+            end
+            print("🎣 Intercepting RequestFishingMinigameStarted (universal)")
         end
     end
 end
 
-local function autoReel()
-    if not Settings.AutoReel or not fishHooked then return end
+-- Setup listener on load
+task.spawn(setupRemoteListener)
+
+local function handleAutoReel()
+    if not Settings.AutoCast then 
+        -- Reset everything when auto cast is off
+        reelMinigameDetectedTime = 0
+        reelDone = false
+        lastHookClickTime = 0
+        wasMinigameActive = false
+        minigameActiveFromRemote = false
+        return 
+    end
     
-    -- Spam click to reel in fish
-    while fishHooked and Settings.AutoReel do
-        pcall(function()
-            mouse1click()
-        end)
+    -- Look for fishing minigame with MORE SPECIFIC checks
+    local fishingGui = LocalPlayer.PlayerGui:FindFirstChild("Fishing")
+    if not fishingGui then 
+        -- Reset immediately if GUI not found
+        reelMinigameDetectedTime = 0
+        reelDone = false
+        lastHookClickTime = 0
+        wasMinigameActive = false
+        minigameActiveFromRemote = false
+        return 
+    end
+    
+    local minigameDisplay = fishingGui:FindFirstChild("Main", true)
+    if not minigameDisplay then 
+        -- Reset immediately if display not found
+        reelMinigameDetectedTime = 0
+        reelDone = false
+        lastHookClickTime = 0
+        wasMinigameActive = false
+        minigameActiveFromRemote = false
+        return 
+    end
+    
+    local minigame = minigameDisplay:FindFirstChild("Minigame", true)
+    
+    -- CRITICAL FIX: Only proceed if minigame exists AND is visible
+    if not minigame or not minigame.Visible then
+        -- Minigame closed or not visible - IMMEDIATELY reset everything and STOP
+        reelMinigameDetectedTime = 0
+        reelDone = false
+        lastHookClickTime = 0
+        wasMinigameActive = false
+        minigameActiveFromRemote = false
+        return -- EXIT FUNCTION - Don't click anything!
+    end
+    
+    -- ADDITIONAL GUARD: Check if minigame container has Size (is rendered)
+    if minigame:IsA("GuiObject") and minigame.AbsoluteSize.X == 0 and minigame.AbsoluteSize.Y == 0 then
+        -- Minigame has no size - not actually visible
+        reelMinigameDetectedTime = 0
+        reelDone = false
+        lastHookClickTime = 0
+        wasMinigameActive = false
+        minigameActiveFromRemote = false
+        return
+    end
+    
+    -- Minigame is visible - proceed with handling
+    wasMinigameActive = true
+    
+    -- Detect which minigame is active (MUTUAL EXCLUSIVE - only one can be true)
+    local isReelMinigame = false
+    local isHookMinigame = false
+    
+    -- Check for reel minigame (appears right after cast, has bar/indicator)
+    local indicator = minigame:FindFirstChild("Indicator", true) or minigame:FindFirstChild("Bar", true)
+    if indicator and indicator:IsA("GuiObject") and indicator.Visible then
+        isReelMinigame = true
+    end
+    
+    -- Check for hook minigame (appears when fish bites, usually has shake/pull indicator)
+    local shake = minigame:FindFirstChild("Shake", true) or minigame:FindFirstChild("Pull", true)
+    if shake and shake:IsA("GuiObject") and shake.Visible then
+        isHookMinigame = true
+    end
+    
+    -- If we can't detect specifically, assume it's hook if not reel
+    if not isReelMinigame and not isHookMinigame then
+        isHookMinigame = true
+    end
+    
+    -- CRITICAL FIX: Make detection mutual exclusive - reel takes priority
+    if isReelMinigame and isHookMinigame then
+        isHookMinigame = false -- Prioritize reel detection
+    end
+    
+    -- Handle Reel Minigame ONLY - click once after delay
+    if isReelMinigame then
+        -- Reset hook tracking when reel is active
+        lastHookClickTime = 0
         
-        -- Try to find reel remote
-        for _, remote in pairs(ReplicatedStorage:GetDescendants()) do
-            if remote:IsA("RemoteEvent") or remote:IsA("RemoteFunction") then
-                if remote.Name:lower():find("reel") or remote.Name:lower():find("catch") then
-                    pcall(function()
-                        if remote:IsA("RemoteEvent") then
-                            remote:FireServer()
-                        else
-                            remote:InvokeServer()
-                        end
-                    end)
-                end
+        if reelMinigameDetectedTime == 0 then
+            reelMinigameDetectedTime = tick()
+            reelDone = false
+        end
+        
+        if not reelDone and tick() - reelMinigameDetectedTime >= Settings.ReelTiming then
+            -- Single click for reel (Virtual Input)
+            pcall(function()
+                VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+                task.wait(0.05)
+                VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
+                print("✅ Reel clicked!")
+            end)
+            
+            reelDone = true
+        end
+    -- Handle Hook Minigame ONLY - spam with interval (ONLY runs if NOT reel)
+    elseif isHookMinigame then
+        -- Reset reel tracking when hook is active
+        reelMinigameDetectedTime = 0
+        reelDone = false
+        
+        local currentTime = tick()
+        
+        -- SIMPLIFIED GUARD: GUI visibility + has size (NO remote dependency!)
+        local guardPassed = false
+        
+        if minigame and minigame.Visible and minigame:IsA("GuiObject") then
+            -- Check if minigame has actual size (is rendered)
+            local hasSize = minigame.AbsoluteSize.X > 0 and minigame.AbsoluteSize.Y > 0
+            
+            if hasSize then
+                guardPassed = true
             end
         end
         
-        wait(Settings.ReelSpeed)
-    end
-end
-
-local function autoShake()
-    if not Settings.AutoShake then return end
-    
-    -- Shake/wiggle for some fishing games
-    while fishHooked and Settings.AutoShake do
-        -- Simulate mouse movement or key presses
-        pcall(function()
-            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.A, false, game)
-            wait(Settings.ShakeSpeed)
-            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.A, false, game)
-            
-            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.D, false, game)
-            wait(Settings.ShakeSpeed)
-            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.D, false, game)
-        end)
-        
-        wait(Settings.ShakeSpeed * 2)
+        -- Spam click if guard passes
+        if guardPassed then
+            -- Click every Settings.HookTiming seconds - INDEPENDENT from CastDelay!
+            if currentTime - lastHookClickTime >= Settings.HookTiming then
+                pcall(function()
+                    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+                    task.wait(0.01) -- Very short delay, just for press/release
+                    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
+                end)
+                
+                lastHookClickTime = currentTime
+                print("🎯 Hook click @ " .. Settings.HookTiming .. "s interval")
+            end
+        end
     end
 end
 
@@ -245,71 +346,112 @@ local function detectFishBite()
 end
 
 -- Main Auto Fishing Loop
+local lastCastTime = 0
+local minCastInterval = 2 -- Minimum 2 seconds between casts
+
 RunService.Heartbeat:Connect(function()
-    if Settings.AutoCast and not isFishing then
-        wait(Settings.CastDelay)
-        castRod()
+    if Settings.AutoCast then
+        local currentTime = tick()
         
-        -- Wait a bit then check for perfect cast minigame
-        wait(0.5)
-        handlePerfectCast()
+        -- ULTRA-SPECIFIC minigame detection (don't cast during minigame)
+        local isMinigameActive = false
+        local fishingGui = LocalPlayer.PlayerGui:FindFirstChild("Fishing")
+        
+        if fishingGui then
+            local minigameDisplay = fishingGui:FindFirstChild("Main", true)
+            if minigameDisplay and minigameDisplay.Visible then
+                local minigame = minigameDisplay:FindFirstChild("Minigame", true)
+                
+                -- Check if minigame is truly active (visible + has size + has active elements)
+                if minigame and minigame.Visible and minigame:IsA("GuiObject") then
+                    -- Check if has actual size (is rendered)
+                    if minigame.AbsoluteSize.X > 0 and minigame.AbsoluteSize.Y > 0 then
+                        -- Check if has any active minigame elements
+                        local hasActiveElement = false
+                        local elementsToCheck = {
+                            minigame:FindFirstChild("Indicator", true),
+                            minigame:FindFirstChild("Bar", true),
+                            minigame:FindFirstChild("Shake", true),
+                            minigame:FindFirstChild("Pull", true),
+                            minigame:FindFirstChild("Fish", true),
+                            minigame:FindFirstChild("Hook", true),
+                            minigame:FindFirstChild("Mover", true)
+                        }
+                        
+                        for _, element in ipairs(elementsToCheck) do
+                            if element and element:IsA("GuiObject") and element.Visible then
+                                hasActiveElement = true
+                                break
+                            end
+                        end
+                        
+                        if hasActiveElement then
+                            isMinigameActive = true
+                        end
+                    end
+                end
+            end
+        end
+        
+        -- ONLY cast if: minigame is NOT active AND minimum interval has passed
+        if not isMinigameActive and currentTime - lastCastTime >= minCastInterval then
+            lastCastTime = currentTime
+            
+            -- DON'T reset remote flag here - let it stay active during minigame
+            -- minigameActiveFromRemote will only reset when minigame closes
+            
+            -- Method 1: Fire ChargeFishingRod remote (prioritize this)
+            local packages = ReplicatedStorage:FindFirstChild("Packages", true)
+            if packages then
+                local chargeFishingRod = packages:FindFirstChild("ChargeFishingRod", true)
+                if chargeFishingRod and chargeFishingRod:IsA("RemoteFunction") then
+                    pcall(function()
+                        chargeFishingRod:InvokeServer()
+                    end)
+                end
+            end
+            
+            -- Method 2: Hold mouse for Settings.CastDelay seconds then release (Virtual Input)
+            -- This runs ONCE per minCastInterval, NOT spammed
+            pcall(function()
+                VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+                print("🖱️ Holding mouse for", Settings.CastDelay, "seconds...")
+                task.wait(Settings.CastDelay)
+                VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
+                print("🎣 Cast executed (mouse press hold)")
+            end)
+        end
     end
     
-    -- Detect fish bite
-    if isFishing and detectFishBite() then
-        fishHooked = true
-        isFishing = false
-        print("🐟 Fish hooked!")
-        
-        -- Start auto reel
-        spawn(autoReel)
-        spawn(autoShake)
-        
-        -- Reset after some time
-        wait(5)
-        fishHooked = false
-        isFishing = false
+    -- Check for minigames every frame (instant/aggressive)
+    if Settings.AutoCast then
+        handleAutoReel()
     end
 end)
 
 -- GUI Elements - Main Tab
 MainTab:Toggle{
-    Name = "Auto Cast",
+    Name = "Auto Cast & Reel",
     StartingState = false,
-    Description = "Automatically cast fishing rod",
+    Description = "Auto cast, auto reel, and auto hook with timing",
     Callback = function(state)
         Settings.AutoCast = state
+        
+        -- Reset all states when toggling
+        if not state then
+            reelMinigameDetectedTime = 0
+            reelDone = false
+            lastHookClickTime = 0
+            wasMinigameActive = false
+        end
+        
         print("🎣 Auto Cast:", state and "ON" or "OFF")
-    end
-}
-
-MainTab:Toggle{
-    Name = "Perfect Cast",
-    StartingState = false,
-    Description = "Automatically get perfect cast timing",
-    Callback = function(state)
-        Settings.PerfectCast = state
-        print("✨ Perfect Cast:", state and "ON" or "OFF")
-    end
-}
-
-MainTab:Toggle{
-    Name = "Auto Reel",
-    StartingState = false,
-    Description = "Automatically spam click to reel in fish",
-    Callback = function(state)
-        Settings.AutoReel = state
-        print("🎯 Auto Reel:", state and "ON" or "OFF")
-    end
-}
-
-MainTab:Toggle{
-    Name = "Auto Shake",
-    StartingState = false,
-    Description = "Automatically shake/wiggle while reeling",
-    Callback = function(state)
-        Settings.AutoShake = state
-        print("🌊 Auto Shake:", state and "ON" or "OFF")
+        
+        GUI:Notification{
+            Title = state and "Auto Fishing ON" or "Auto Fishing OFF",
+            Text = state and "Auto fishing with realistic timing" or "Stopped fishing",
+            Duration = 2
+        }
     end
 }
 
@@ -343,181 +485,127 @@ MainTab:Button{
 }
 
 MainTab:Button{
-    Name = "Scan All Tools",
-    Description = "List all tools in character and backpack",
+    Name = "Sell All Fish",
+    Description = "Instantly sell all fish in inventory",
     Callback = function()
-        print("========== TOOL SCAN ==========")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("💰 [SELL] Selling all fish...")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         
-        -- Scan equipped tools
-        print("\n📦 EQUIPPED TOOLS:")
-        local equippedCount = 0
-        if LocalPlayer.Character then
-            for _, item in pairs(LocalPlayer.Character:GetChildren()) do
-                if item:IsA("Tool") then
-                    print("  ✅ " .. item.Name .. " (Class: " .. item.ClassName .. ")")
-                    equippedCount = equippedCount + 1
+        -- Find and fire all sell-related remotes
+        local packages = ReplicatedStorage:FindFirstChild("Packages", true)
+        if not packages then
+            print("❌ Packages not found")
+            GUI:Notification{
+                Title = "Sell Failed",
+                Text = "Could not find Packages folder",
+                Duration = 3
+            }
+            return
+        end
+        
+        local soldCount = 0
+        
+        -- Method 1: Fire SellAllFish remote
+        for _, obj in pairs(packages:GetDescendants()) do
+            if obj:IsA("RemoteFunction") or obj:IsA("RemoteEvent") then
+                local name = obj.Name:lower()
+                if name:find("sell") then
+                    pcall(function()
+                        if obj:IsA("RemoteFunction") then
+                            obj:InvokeServer()
+                            print("✅ Invoked RemoteFunction:", obj.Name)
+                        else
+                            obj:FireServer()
+                            print("✅ Fired RemoteEvent:", obj.Name)
+                        end
+                        soldCount = soldCount + 1
+                    end)
                 end
             end
         end
-        if equippedCount == 0 then
-            print("  ❌ No equipped tools")
-        end
         
-        -- Scan backpack
-        print("\n🎒 BACKPACK TOOLS:")
-        local backpackCount = 0
-        for _, item in pairs(LocalPlayer.Backpack:GetChildren()) do
-            if item:IsA("Tool") then
-                print("  ✅ " .. item.Name .. " (Class: " .. item.ClassName .. ")")
-                backpackCount = backpackCount + 1
-            end
-        end
-        if backpackCount == 0 then
-            print("  ❌ No tools in backpack")
-        end
-        
-        print("\n📊 Total: " .. (equippedCount + backpackCount) .. " tools found")
-        print("===============================\n")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("💰 Fired", soldCount, "sell remotes")
         
         GUI:Notification{
-            Title = "Tool Scan Complete",
-            Text = "Found " .. (equippedCount + backpackCount) .. " tools. Check console!",
-            Duration = 3
-        }
-    end
-}
-
-MainTab:Button{
-    Name = "Scan Remotes",
-    Description = "Find all RemoteEvents and RemoteFunctions",
-    Callback = function()
-        print("========== REMOTE SCAN ==========")
-        
-        local output = "========== REMOTE SCAN ==========\n\n"
-        local remoteCount = 0
-        
-        for _, remote in pairs(ReplicatedStorage:GetDescendants()) do
-            if remote:IsA("RemoteEvent") or remote:IsA("RemoteFunction") then
-                local line = "🌐 " .. remote:GetFullName() .. " (" .. remote.ClassName .. ")\n"
-                print(line)
-                output = output .. line
-                remoteCount = remoteCount + 1
-            end
-        end
-        
-        local summary = "\n📊 Total: " .. remoteCount .. " remotes found\n=================================\n"
-        print(summary)
-        output = output .. summary
-        
-        -- Save to clipboard (if supported by executor)
-        pcall(function()
-            setclipboard(output)
-            print("✅ Output copied to clipboard!")
-        end)
-        
-        -- Also save to file
-        writefile("fishing_remotes_scan.txt", output)
-        print("✅ Output saved to: fishing_remotes_scan.txt")
-        
-        GUI:Notification{
-            Title = "Remote Scan Complete",
-            Text = "Found " .. remoteCount .. " remotes. Saved to file!",
-            Duration = 3
-        }
-    end
-}
-
-MainTab:Button{
-    Name = "Scan UI Elements",
-    Description = "Find fishing-related UI elements",
-    Callback = function()
-        print("========== UI SCAN ==========")
-        
-        local output = "========== UI SCAN ==========\n\n"
-        local playerGui = LocalPlayer:WaitForChild("PlayerGui")
-        local uiCount = 0
-        
-        for _, gui in pairs(playerGui:GetDescendants()) do
-            local name = gui.Name:lower()
-            -- Look for fishing-related UI
-            if name:find("fish") or name:find("rod") or name:find("cast") or name:find("reel") or name:find("catch") or name:find("bite") then
-                local line = "🎨 " .. gui:GetFullName() .. " (" .. gui.ClassName .. ")\n"
-                print(line)
-                output = output .. line
-                
-                if gui:IsA("TextButton") or gui:IsA("ImageButton") then
-                    local buttonInfo = "   └─ 🔘 BUTTON - Can be clicked!\n"
-                    print(buttonInfo)
-                    output = output .. buttonInfo
-                end
-                uiCount = uiCount + 1
-            end
-        end
-        
-        local summary = "\n📊 Total: " .. uiCount .. " fishing UI elements found\n=============================\n"
-        print(summary)
-        output = output .. summary
-        
-        -- Save to clipboard (if supported by executor)
-        pcall(function()
-            setclipboard(output)
-            print("✅ Output copied to clipboard!")
-        end)
-        
-        -- Also save to file
-        writefile("fishing_ui_scan.txt", output)
-        print("✅ Output saved to: fishing_ui_scan.txt")
-        
-        GUI:Notification{
-            Title = "UI Scan Complete",
-            Text = "Found " .. uiCount .. " UI elements. Saved to file!",
+            Title = "Sell All Fish",
+            Text = "Fired " .. soldCount .. " sell remotes!",
             Duration = 3
         }
     end
 }
 
 -- GUI Elements - Settings Tab
-SettingsTab:Slider{
+SettingsTab:Textbox{
     Name = "Cast Delay",
-    Default = 0.5,
-    Min = 0.1,
-    Max = 5,
-    Callback = function(value)
-        Settings.CastDelay = value
-        print("⏱️ Cast Delay:", value)
+    Placeholder = "0.6",
+    Description = "Mouse hold duration when casting (seconds)",
+    Callback = function(text)
+        local value = tonumber(text)
+        if value and value > 0 then
+            Settings.CastDelay = value
+            print("⏱️ Cast Delay:", value)
+            GUI:Notification{
+                Title = "Cast Delay Updated",
+                Text = "Mouse hold " .. value .. " seconds",
+                Duration = 2
+            }
+        else
+            GUI:Notification{
+                Title = "Invalid Input",
+                Text = "Please enter a valid number greater than 0",
+                Duration = 2
+            }
+        end
     end
 }
 
-SettingsTab:Slider{
-    Name = "Reel Speed",
-    Default = 0.01,
-    Min = 0.001,
-    Max = 0.1,
-    Callback = function(value)
-        Settings.ReelSpeed = value
-        print("🎯 Reel Speed:", value)
+SettingsTab:Textbox{
+    Name = "Reel Timing",
+    Placeholder = "0.6",
+    Description = "Delay before reeling (tunggu sebelum klik reel)",
+    Callback = function(text)
+        local value = tonumber(text)
+        if value and value > 0 then
+            Settings.ReelTiming = value
+            print("🎣 Reel Timing:", value)
+            GUI:Notification{
+                Title = "Reel Timing Updated",
+                Text = "Set to " .. value .. " seconds",
+                Duration = 2
+            }
+        else
+            GUI:Notification{
+                Title = "Invalid Input",
+                Text = "Please enter a valid number greater than 0",
+                Duration = 2
+            }
+        end
     end
 }
 
-SettingsTab:Slider{
-    Name = "Perfect Timing",
-    Default = 0.1,
-    Min = 0.01,
-    Max = 1,
-    Callback = function(value)
-        Settings.PerfectTiming = value
-        print("✨ Perfect Timing:", value)
-    end
-}
-
-SettingsTab:Slider{
-    Name = "Shake Speed",
-    Default = 0.05,
-    Min = 0.01,
-    Max = 0.2,
-    Callback = function(value)
-        Settings.ShakeSpeed = value
-        print("🌊 Shake Speed:", value)
+SettingsTab:Textbox{
+    Name = "Hook Timing",
+    Placeholder = "0.1",
+    Description = "Click interval for hook minigame (spam speed)",
+    Callback = function(text)
+        local value = tonumber(text)
+        if value and value > 0 then
+            Settings.HookTiming = value
+            print("✨ Hook Timing:", value)
+            GUI:Notification{
+                Title = "Hook Timing Updated",
+                Text = "Set to " .. value .. " seconds (spam interval)",
+                Duration = 2
+            }
+        else
+            GUI:Notification{
+                Title = "Invalid Input",
+                Text = "Please enter a valid number greater than 0",
+                Duration = 2
+            }
+        end
     end
 }
 
@@ -536,5 +624,5 @@ GUI:Notification{
 }
 
 print("✅ Auto Fishing Script loaded successfully!")
-print("🎣 Features: Auto Cast, Perfect Cast, Auto Reel, Auto Shake")
+print("🎣 Features: Auto Cast, Auto Reel, and Auto Hook")
 print("⚙️ Configure settings in the Settings tab")
