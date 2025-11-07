@@ -674,6 +674,39 @@ local function autoQuestLoop()
     end
 end
 
+-- Additional quest helper functions (for backward compatibility)
+local function getActiveQuests()
+    print("🔍 [QUEST] Checking active quests...")
+    
+    -- Check PlayerGui for quest UI
+    for _, gui in pairs(LocalPlayer.PlayerGui:GetChildren()) do
+        local guiName = gui.Name:lower()
+        if guiName:find("quest") or guiName:find("objective") then
+            print("📋 Quest GUI found:", gui.Name)
+            
+            -- Look for quest text
+            for _, obj in pairs(gui:GetDescendants()) do
+                if obj:IsA("TextLabel") or obj:IsA("TextButton") then
+                    local text = obj.Text
+                    if text ~= "" and #text > 5 then
+                        print("  └─ Text:", text)
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function triggerQuestCompletion(questName)
+    print("🎯 [QUEST] Triggering quest completion...")
+    return forceCompleteQuest()
+end
+
+local function findQuestRemotes()
+    print("🔍 [QUEST] Finding quest remotes...")
+    return scanQuestSystem()
+end
+
 -- ═══════════════════════════════════════════════════════════════
 -- INSTANT FISHING - HOOKMETAMETHOD IMPLEMENTATION
 -- ═══════════════════════════════════════════════════════════════
