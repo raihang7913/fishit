@@ -76,6 +76,17 @@ local isFishing = false
 local isMinigameActive = false
 local currentRod = nil
 
+-- RNG System Detection
+local RNGData = {
+    rarityChances = {},
+    fishPool = {},
+    luckMultiplier = 1,
+    currentSeed = 0,
+    locationBonus = {},
+    detectedCalls = {},
+    totalCatches = 0
+}
+
 -- ═══════════════════════════════════════════════════════════════
 -- MOBILE-FRIENDLY FALLBACK GUI
 -- ═══════════════════════════════════════════════════════════════
@@ -507,6 +518,241 @@ end
 
 -- Setup listener on load
 task.spawn(setupRemoteListener)
+
+-- ═══════════════════════════════════════════════════════════════
+-- RNG SYSTEM DETECTOR - AUTO-DETECT FISHING RNG
+-- ═══════════════════════════════════════════════════════════════
+
+local rngDetectionActive = false
+local oldNamecallForRNG
+
+local function startRNGDetection()
+    if rngDetectionActive then
+        print("🎲 RNG Detection already active!")
+        return
+    end
+    
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print("🎲 [RNG DETECTOR] Starting RNG detection...")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    
+    if not hookmetamethod or not getnamecallmethod then
+        warn("❌ hookmetamethod not available - RNG detection requires it!")
+        return
+    end
+    
+    -- Hook __namecall to intercept all remote calls
+    oldNamecallForRNG = hookmetamethod(game, "__namecall", function(self, ...)
+        local method = getnamecallmethod()
+        local args = {...}
+        
+        if method == "InvokeServer" or method == "FireServer" then
+            local remoteName = self.Name
+            local remoteNameLower = remoteName:lower()
+            
+            -- Detect fishing-related remotes
+            if remoteNameLower:find("fish") or remoteNameLower:find("catch") or 
+               remoteNameLower:find("reel") or remoteNameLower:find("loot") or
+               remoteNameLower:find("reward") or remoteNameLower:find("result") then
+                
+                -- Call original and capture result
+                local result
+                if method == "InvokeServer" then
+                    result = oldNamecallForRNG(self, ...)
+                else
+                    oldNamecallForRNG(self, ...)
+                end
+                
+                -- Log the call
+                print("\n🎣 [RNG] Remote intercepted:", remoteName)
+                print("  📞 Method:", method)
+                print("  📥 Arguments:")
+                for i, arg in ipairs(args) do
+                    print("    [" .. i .. "]", type(arg), ":", tostring(arg))
+                    if type(arg) == "table" then
+                        for k, v in pairs(arg) do
+                            print("      └─", tostring(k), ":", tostring(v))
+                        end
+                    end
+                end
+                
+                -- Analyze result (only for InvokeServer)
+                if method == "InvokeServer" and result then
+                    print("  📤 Result type:", type(result))
+                    
+                    if type(result) == "table" then
+                        print("  📤 Result table:")
+                        for k, v in pairs(result) do
+                            print("    └─", tostring(k), ":", tostring(v))
+                            
+                            -- Extract fish data
+                            local kLower = tostring(k):lower()
+                            if kLower == "fish" or kLower == "name" then
+                                RNGData.fishPool[tostring(v)] = (RNGData.fishPool[tostring(v)] or 0) + 1
+                                RNGData.totalCatches = RNGData.totalCatches + 1
+                            end
+                            
+                            -- Extract rarity
+                            if kLower == "rarity" then
+                                local rarity = tostring(v)
+                                RNGData.rarityChances[rarity] = (RNGData.rarityChances[rarity] or 0) + 1
+                            end
+                            
+                            -- Extract chance/probability
+                            if kLower == "chance" or kLower == "probability" or kLower == "rate" then
+                                print("      🎲 RNG Chance detected:", v)
+                            end
+                            
+                            -- Extract luck multiplier
+                            if kLower == "luck" or kLower == "multiplier" or kLower == "bonus" then
+                                RNGData.luckMultiplier = tonumber(v) or RNGData.luckMultiplier
+                                print("      ✨ Luck multiplier:", v)
+                            end
+                            
+                            -- Extract seed
+                            if kLower == "seed" or kLower == "random" then
+                                RNGData.currentSeed = tonumber(v) or RNGData.currentSeed
+                                print("      🌱 RNG Seed:", v)
+                            end
+                            
+                            -- Nested tables
+                            if type(v) == "table" then
+                                for k2, v2 in pairs(v) do
+                                    print("      └─", tostring(k2), ":", tostring(v2))
+                                end
+                            end
+                        end
+                    elseif type(result) == "string" then
+                        print("  📤 Result:", result)
+                        -- Track fish names
+                        RNGData.fishPool[result] = (RNGData.fishPool[result] or 0) + 1
+                        RNGData.totalCatches = RNGData.totalCatches + 1
+                    else
+                        print("  📤 Result:", tostring(result))
+                    end
+                end
+                
+                -- Store detected call
+                table.insert(RNGData.detectedCalls, {
+                    remote = remoteName,
+                    method = method,
+                    args = args,
+                    result = result,
+                    timestamp = tick()
+                })
+                
+                return result
+            end
+        end
+        
+        return oldNamecallForRNG(self, ...)
+    end)
+    
+    rngDetectionActive = true
+    print("✅ [RNG DETECTOR] Active! Catching fish to analyze RNG...")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+end
+
+local function stopRNGDetection()
+    if not rngDetectionActive then
+        print("🎲 RNG Detection already stopped!")
+        return
+    end
+    
+    -- Restore original
+    if oldNamecallForRNG then
+        hookmetamethod(game, "__namecall", oldNamecallForRNG)
+    end
+    
+    rngDetectionActive = false
+    print("⏹️ [RNG DETECTOR] Stopped")
+end
+
+local function printRNGReport()
+    print("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print("🎲 RNG SYSTEM REPORT")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    
+    print("\n📊 Total Catches Detected:", RNGData.totalCatches)
+    
+    -- Rarity distribution
+    if next(RNGData.rarityChances) then
+        print("\n🌟 Rarity Distribution:")
+        local sortedRarities = {}
+        for rarity, count in pairs(RNGData.rarityChances) do
+            table.insert(sortedRarities, {rarity = rarity, count = count})
+        end
+        table.sort(sortedRarities, function(a, b) return a.count > b.count end)
+        
+        for _, data in ipairs(sortedRarities) do
+            local percentage = (data.count / RNGData.totalCatches) * 100
+            print(string.format("  • %s: %d catches (%.2f%%)", data.rarity, data.count, percentage))
+        end
+    else
+        print("\n🌟 Rarity Distribution: No data yet")
+    end
+    
+    -- Fish pool
+    if next(RNGData.fishPool) then
+        print("\n🐟 Fish Pool (Top 10):")
+        local sortedFish = {}
+        for fish, count in pairs(RNGData.fishPool) do
+            table.insert(sortedFish, {fish = fish, count = count})
+        end
+        table.sort(sortedFish, function(a, b) return a.count > b.count end)
+        
+        for i = 1, math.min(10, #sortedFish) do
+            local data = sortedFish[i]
+            local percentage = (data.count / RNGData.totalCatches) * 100
+            print(string.format("  %d. %s: %d catches (%.2f%%)", i, data.fish, data.count, percentage))
+        end
+        
+        if #sortedFish > 10 then
+            print("  ... +" .. (#sortedFish - 10) .. " more fish")
+        end
+    else
+        print("\n🐟 Fish Pool: No data yet")
+    end
+    
+    -- Luck/bonuses
+    print("\n✨ Luck & Bonuses:")
+    print("  • Luck Multiplier:", RNGData.luckMultiplier .. "x")
+    print("  • Current Seed:", RNGData.currentSeed)
+    
+    if next(RNGData.locationBonus) then
+        print("  • Location Bonuses:")
+        for location, bonus in pairs(RNGData.locationBonus) do
+            print("    └─", location, ":", bonus)
+        end
+    end
+    
+    -- Recent calls
+    print("\n📞 Recent Remote Calls:", #RNGData.detectedCalls)
+    if #RNGData.detectedCalls > 0 then
+        print("  Latest 5 calls:")
+        for i = math.max(1, #RNGData.detectedCalls - 4), #RNGData.detectedCalls do
+            local call = RNGData.detectedCalls[i]
+            print("    " .. i .. ". " .. call.remote .. " (" .. call.method .. ")")
+        end
+    end
+    
+    print("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print("💡 Tip: Catch more fish for better RNG analysis!")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+end
+
+local function resetRNGData()
+    RNGData = {
+        rarityChances = {},
+        fishPool = {},
+        luckMultiplier = 1,
+        currentSeed = 0,
+        locationBonus = {},
+        detectedCalls = {},
+        totalCatches = 0
+    }
+    print("🔄 [RNG] Data reset!")
+end
 
 -- ═══════════════════════════════════════════════════════════════
 -- AUTO QUEST COMPLETION - FORCE COMPLETE WITHOUT CATCHING FISH
@@ -2139,6 +2385,26 @@ if useFallbackGUI then
         end
     end)
     
+    GUI.Button("🎲 Start RNG Detector", "Detect fishing RNG system", function()
+        startRNGDetection()
+        GUI.Notification("RNG Detector", "Started! Catch fish to analyze RNG", 3)
+    end)
+    
+    GUI.Button("📊 RNG Report", "Show RNG analysis", function()
+        printRNGReport()
+        GUI.Notification("RNG Report", "Check console for full report!", 3)
+    end)
+    
+    GUI.Button("⏹️ Stop RNG Detector", "Stop RNG detection", function()
+        stopRNGDetection()
+        GUI.Notification("RNG Detector", "Stopped", 2)
+    end)
+    
+    GUI.Button("🔄 Reset RNG Data", "Clear RNG statistics", function()
+        resetRNGData()
+        GUI.Notification("RNG Data", "Statistics reset!", 2)
+    end)
+    
     GUI.Textbox("Perfect Threshold", "10", "Pixel distance for perfect", function(text)
         local value = tonumber(text)
         if value and value > 0 then
@@ -2585,6 +2851,58 @@ MainTab:Button{
             Title = "Sell All Fish",
             Text = "Fired " .. soldCount .. " sell remotes!",
             Duration = 3
+        }
+    end
+}
+
+MainTab:Button{
+    Name = "🎲 Start RNG Detector",
+    Description = "Analyze fishing RNG system (catch fish to collect data)",
+    Callback = function()
+        startRNGDetection()
+        GUI:Notification{
+            Title = "RNG Detector Started",
+            Text = "Catch fish to analyze RNG system! Check console for live data.",
+            Duration = 4
+        }
+    end
+}
+
+MainTab:Button{
+    Name = "📊 RNG Report",
+    Description = "Show complete RNG analysis report (F9)",
+    Callback = function()
+        printRNGReport()
+        GUI:Notification{
+            Title = "RNG Report Generated",
+            Text = "Check console (F9) for full RNG analysis!",
+            Duration = 3
+        }
+    end
+}
+
+MainTab:Button{
+    Name = "⏹️ Stop RNG Detector",
+    Description = "Stop RNG detection and analysis",
+    Callback = function()
+        stopRNGDetection()
+        GUI:Notification{
+            Title = "RNG Detector Stopped",
+            Text = "Detection stopped. Use 'RNG Report' to see results.",
+            Duration = 3
+        }
+    end
+}
+
+MainTab:Button{
+    Name = "🔄 Reset RNG Data",
+    Description = "Clear all collected RNG statistics",
+    Callback = function()
+        resetRNGData()
+        GUI:Notification{
+            Title = "RNG Data Reset",
+            Text = "All RNG statistics cleared!",
+            Duration = 2
         }
     end
 }
