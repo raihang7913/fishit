@@ -524,6 +524,56 @@ local function forceCompleteQuest()
     
     local completedCount = 0
     
+    -- SPECIFIC QUEST REMOTES (berdasarkan log hasil scan)
+    print("📋 [QUEST] Trying specific quest remotes...")
+    
+    -- 1. Try to activate/complete quest lines
+    local activateQuestLine = packages:FindFirstChild("ActivateQuestLine", true)
+    if activateQuestLine and activateQuestLine:IsA("RemoteFunction") then
+        pcall(function()
+            -- Try different quest line IDs
+            for i = 1, 10 do
+                activateQuestLine:InvokeServer(i)
+            end
+            print("✅ [QUEST] ActivateQuestLine triggered (1-10)")
+            completedCount = completedCount + 1
+        end)
+    end
+    
+    -- 2. Try to get and manipulate quest data
+    local getQuestData = packages:FindFirstChild("GetQuestData", true)
+    if getQuestData and getQuestData:IsA("RemoteFunction") then
+        pcall(function()
+            local questData = getQuestData:InvokeServer()
+            print("✅ [QUEST] GetQuestData called:", questData)
+            completedCount = completedCount + 1
+        end)
+    end
+    
+    -- 3. Try to claim event rewards (bisa untuk quest)
+    local claimEventReward = packages:FindFirstChild("ClaimEventReward", true)
+    if claimEventReward and claimEventReward:IsA("RemoteEvent") then
+        pcall(function()
+            -- Try claiming multiple rewards
+            for i = 1, 5 do
+                claimEventReward:FireServer(i)
+            end
+            print("✅ [QUEST] ClaimEventReward fired (1-5)")
+            completedCount = completedCount + 1
+        end)
+    end
+    
+    -- 4. Try mega quest completion
+    local getMegaQuestData = packages:FindFirstChild("GetMegaQuestData", true)
+    if getMegaQuestData and getMegaQuestData:IsA("RemoteFunction") then
+        pcall(function()
+            getMegaQuestData:InvokeServer()
+            getMegaQuestData:InvokeServer(true)
+            print("✅ [QUEST] GetMegaQuestData triggered")
+            completedCount = completedCount + 1
+        end)
+    end
+    
     -- Scan all remotes
     for _, remote in pairs(packages:GetDescendants()) do
         if remote:IsA("RemoteFunction") or remote:IsA("RemoteEvent") then
@@ -674,27 +724,279 @@ local function autoQuestLoop()
     end
 end
 
--- Additional quest helper functions (for backward compatibility)
-local function getActiveQuests()
-    print("🔍 [QUEST] Checking active quests...")
+-- ═══════════════════════════════════════════════════════════════
+-- QUEST PROGRESS DETECTION - LOST ISLE BOARD (WORLD OBJECT)
+-- ═══════════════════════════════════════════════════════════════
+
+local function detectLostIsleQuest()
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print("🏝️ [LOST ISLE] Detecting quest board in world...")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     
-    -- Check PlayerGui for quest UI
-    for _, gui in pairs(LocalPlayer.PlayerGui:GetChildren()) do
-        local guiName = gui.Name:lower()
-        if guiName:find("quest") or guiName:find("objective") then
-            print("📋 Quest GUI found:", gui.Name)
+    local questInfo = {
+        found = false,
+        name = "",
+        progress = "",
+        currentCount = 0,
+        totalCount = 0,
+        reward = "",
+        boardPath = "",
+        objectivesFound = {},
+        allText = {}
+    }
+    
+    -- METHOD 1: Scan Workspace for quest boards/signs (3D objects)
+    print("\n🔍 [WORLD] Scanning Workspace for quest boards...")
+    for _, obj in pairs(workspace:GetDescendants()) do
+        local objName = obj.Name:lower()
+        
+        -- Look for boards, signs, or quest objects
+        if objName:find("board") or objName:find("sign") or objName:find("quest") or 
+           objName:find("lost") or objName:find("isle") or objName:find("ghost") then
             
-            -- Look for quest text
-            for _, obj in pairs(gui:GetDescendants()) do
-                if obj:IsA("TextLabel") or obj:IsA("TextButton") then
-                    local text = obj.Text
-                    if text ~= "" and #text > 5 then
-                        print("  └─ Text:", text)
+            print("📋 Found potential quest object:", obj:GetFullName())
+            
+            -- Check for SurfaceGui or BillboardGui on this object
+            for _, gui in pairs(obj:GetDescendants()) do
+                if gui:IsA("SurfaceGui") or gui:IsA("BillboardGui") then
+                    print("  ├─ Found GUI:", gui.ClassName, "-", gui:GetFullName())
+                    
+                    -- Look for text in the GUI
+                    for _, textObj in pairs(gui:GetDescendants()) do
+                        if textObj:IsA("TextLabel") or textObj:IsA("TextButton") then
+                            local text = textObj.Text
+                            local textLower = text:lower()
+                            
+                            if text ~= "" and #text > 1 then
+                                print("  │  └─ Text found:", text)
+                                table.insert(questInfo.allText, text)
+                                
+                                -- Check for quest-related keywords
+                                if textLower:find("ghost") or textLower:find("lost") or 
+                                   textLower:find("isle") or textLower:find("secret") or
+                                   textLower:find("mystery") or textLower:find("catch") then
+                                    
+                                    questInfo.found = true
+                                    questInfo.boardPath = obj:GetFullName()
+                                    
+                                    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                                    print("✅ QUEST BOARD FOUND!")
+                                    print("📍 Object:", obj.Name)
+                                    print("📍 Full Path:", obj:GetFullName())
+                                    print("📝 Text:", text)
+                                    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                                    
+                                    -- Store quest name
+                                    if textLower:find("ghost") then
+                                        questInfo.reward = "Ghostfin"
+                                    end
+                                    
+                                    -- Detect progress format (e.g., "0/5", "1/3", "Progress: 2/10")
+                                    local current, total = text:match("(%d+)/(%d+)")
+                                    if current and total then
+                                        questInfo.progress = current .. "/" .. total
+                                        questInfo.currentCount = tonumber(current)
+                                        questInfo.totalCount = tonumber(total)
+                                        print("📊 Progress detected:", questInfo.progress)
+                                    end
+                                    
+                                    -- Store objective
+                                    table.insert(questInfo.objectivesFound, text)
+                                end
+                            end
+                        end
                     end
                 end
             end
         end
     end
+    
+    -- METHOD 2: Scan PlayerGui for any quest UI (fallback)
+    print("\n🔍 [GUI] Scanning PlayerGui for quest UI...")
+    for _, gui in pairs(LocalPlayer.PlayerGui:GetChildren()) do
+        for _, obj in pairs(gui:GetDescendants()) do
+            if obj:IsA("TextLabel") or obj:IsA("TextButton") then
+                local text = obj.Text
+                local textLower = text:lower()
+                
+                -- Detect Lost Isle quest
+                if textLower:find("lost isle") or textLower:find("ghostfin") or 
+                   textLower:find("secret") or textLower:find("mystery") then
+                    
+                    questInfo.found = true
+                    
+                    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                    print("✅ QUEST UI FOUND!")
+                    print("📍 GUI:", gui.Name)
+                    print("� Text:", text)
+                    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                    
+                    -- Detect progress
+                    local current, total = text:match("(%d+)/(%d+)")
+                    if current and total then
+                        questInfo.progress = current .. "/" .. total
+                        questInfo.currentCount = tonumber(current)
+                        questInfo.totalCount = tonumber(total)
+                        print("📊 Progress:", questInfo.progress)
+                    end
+                end
+            end
+        end
+    end
+    
+    -- METHOD 3: Check Workspace for specific Lost Isle location
+    print("\n🔍 [LOCATION] Looking for Lost Isle area...")
+    local lostIsle = workspace:FindFirstChild("LostIsle", true) or 
+                    workspace:FindFirstChild("Lost Isle", true) or
+                    workspace:FindFirstChild("SecretIsland", true)
+    
+    if lostIsle then
+        print("🏝️ Found Lost Isle location:", lostIsle:GetFullName())
+        questInfo.location = lostIsle.Name
+    end
+    
+    print("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print("📋 QUEST SUMMARY:")
+    print("  • Found:", questInfo.found and "YES ✅" or "NO ❌")
+    print("  • Progress:", questInfo.progress ~= "" and questInfo.progress or "N/A")
+    print("  • Current/Total:", questInfo.currentCount .. "/" .. questInfo.totalCount)
+    print("  • Completed:", (questInfo.currentCount >= questInfo.totalCount and questInfo.totalCount > 0) and "YES ✅" or "NO")
+    print("  • Reward:", questInfo.reward ~= "" and questInfo.reward or "N/A")
+    print("  • Location:", questInfo.location ~= "" and questInfo.location or "N/A")
+    print("  • Board Path:", questInfo.boardPath ~= "" and questInfo.boardPath or "N/A")
+    print("  • Objectives Found:", #questInfo.objectivesFound)
+    print("  • Total Text Found:", #questInfo.allText)
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    
+    -- Print all text found
+    if #questInfo.allText > 0 then
+        print("\n📝 All text found on boards:")
+        for i, text in ipairs(questInfo.allText) do
+            print("  " .. i .. ". " .. text)
+        end
+    end
+    
+    return questInfo
+end
+
+local function monitorQuestProgress()
+    print("🔄 [MONITOR] Starting quest progress monitor...")
+    print("👀 Watching world boards and UI for progress changes...")
+    
+    local lastProgress = ""
+    local lastCurrentCount = 0
+    
+    while Settings.AutoQuest do
+        task.wait(2) -- Check every 2 seconds
+        
+        -- METHOD 1: Check world boards (primary method)
+        for _, obj in pairs(workspace:GetDescendants()) do
+            if obj:IsA("SurfaceGui") or obj:IsA("BillboardGui") then
+                for _, textObj in pairs(obj:GetDescendants()) do
+                    if textObj:IsA("TextLabel") or textObj:IsA("TextButton") then
+                        local text = textObj.Text
+                        local textLower = text:lower()
+                        
+                        -- Check for quest-related text
+                        if textLower:find("ghost") or textLower:find("lost") or 
+                           textLower:find("isle") or textLower:find("secret") then
+                            
+                            local current, total = text:match("(%d+)/(%d+)")
+                            
+                            if current and total then
+                                local currentNum = tonumber(current)
+                                local totalNum = tonumber(total)
+                                local progress = current .. "/" .. total
+                                
+                                -- Check if progress changed
+                                if currentNum ~= lastCurrentCount then
+                                    lastCurrentCount = currentNum
+                                    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                                    print("📊 [PROGRESS UPDATE] Quest:", progress)
+                                    print("📍 Board:", obj.Parent and obj.Parent.Name or "Unknown")
+                                    print("📝 Full Text:", text)
+                                    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                                    
+                                    -- Check if completed
+                                    if currentNum >= totalNum then
+                                        print("✅✅✅ [QUEST COMPLETE] ✅✅✅")
+                                        print("🎁 Ready to claim Ghostfin reward!")
+                                        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                                        
+                                        -- Try to claim reward
+                                        forceCompleteQuest()
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        
+        -- METHOD 2: Check PlayerGui (fallback)
+        for _, gui in pairs(LocalPlayer.PlayerGui:GetChildren()) do
+            for _, obj in pairs(gui:GetDescendants()) do
+                if obj:IsA("TextLabel") then
+                    local text = obj.Text
+                    local textLower = text:lower()
+                    
+                    if textLower:find("lost isle") or textLower:find("ghostfin") then
+                        local current, total = text:match("(%d+)/(%d+)")
+                        
+                        if current and total then
+                            local currentNum = tonumber(current)
+                            
+                            if currentNum ~= lastCurrentCount then
+                                lastCurrentCount = currentNum
+                                print("📊 [UI PROGRESS] Lost Isle:", current .. "/" .. total)
+                                
+                                if currentNum >= tonumber(total) then
+                                    print("✅ [COMPLETE] Quest finished!")
+                                    forceCompleteQuest()
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    print("⏹️ [MONITOR] Quest monitoring stopped")
+end
+
+-- Additional quest helper functions (for backward compatibility)
+local function getActiveQuests()
+    print("🔍 [QUEST] Checking active quests...")
+    
+    -- Use the new Lost Isle detector
+    local questInfo = detectLostIsleQuest()
+    
+    if not questInfo.found then
+        print("\n⚠️ No Lost Isle quest detected!")
+        print("📋 Scanning all quest-related UI...")
+        
+        -- Fallback: Check all quest UIs
+        for _, gui in pairs(LocalPlayer.PlayerGui:GetChildren()) do
+            local guiName = gui.Name:lower()
+            if guiName:find("quest") or guiName:find("objective") or guiName:find("task") then
+                print("📋 Quest GUI found:", gui.Name)
+                
+                -- Look for quest text
+                for _, obj in pairs(gui:GetDescendants()) do
+                    if obj:IsA("TextLabel") or obj:IsA("TextButton") then
+                        local text = obj.Text
+                        if text ~= "" and #text > 5 then
+                            print("  └─ Text:", text)
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    return questInfo
 end
 
 local function triggerQuestCompletion(questName)
@@ -1331,6 +1633,25 @@ if useFallbackGUI then
         GUI.Notification("Quest Scan", "Found " .. #remotes .. " quest remotes (check console)", 3)
     end)
     
+    GUI.Button("🏝️ Detect Lost Isle Quest", "Scan for Lost Isle quest progress", function()
+        local questInfo = detectLostIsleQuest()
+        if questInfo.found then
+            GUI.Notification("Quest Detected!", "Progress: " .. questInfo.progress .. " (check console)", 4)
+        else
+            GUI.Notification("No Quest Found", "Lost Isle quest not detected", 3)
+        end
+    end)
+    
+    GUI.Button("📊 Monitor Quest Progress", "Auto-monitor quest progress", function()
+        if Settings.AutoQuest then
+            GUI.Notification("Already Active", "Quest monitoring is already running", 2)
+        else
+            Settings.AutoQuest = true
+            task.spawn(monitorQuestProgress)
+            GUI.Notification("Monitor Started", "Watching Lost Isle quest progress...", 3)
+        end
+    end)
+    
     GUI.Button("🔍 Find Rod", "Search for fishing rod", function()
         local rod = findFishingRod()
         if rod then
@@ -1533,6 +1854,49 @@ MainTab:Button{
             Text = "Found " .. #remotes .. " quest remotes (check console F9 for details)",
             Duration = 3
         }
+    end
+}
+
+MainTab:Button{
+    Name = "🏝️ Detect Lost Isle Quest",
+    Description = "Scan for Lost Isle quest and Ghostfin progress",
+    Callback = function()
+        local questInfo = detectLostIsleQuest()
+        if questInfo.found then
+            GUI:Notification{
+                Title = "Lost Isle Quest Found!",
+                Text = "Progress: " .. questInfo.progress .. " | Reward: " .. questInfo.reward,
+                Duration = 5
+            }
+        else
+            GUI:Notification{
+                Title = "No Quest Detected",
+                Text = "Lost Isle quest not found. Make sure you're at Lost Isle!",
+                Duration = 3
+            }
+        end
+    end
+}
+
+MainTab:Button{
+    Name = "📊 Monitor Quest Progress",
+    Description = "Auto-monitor Lost Isle quest progress in real-time",
+    Callback = function()
+        if Settings.AutoQuest then
+            GUI:Notification{
+                Title = "Already Monitoring",
+                Text = "Quest progress monitoring is already active",
+                Duration = 2
+            }
+        else
+            Settings.AutoQuest = true
+            task.spawn(monitorQuestProgress)
+            GUI:Notification{
+                Title = "Monitor Started",
+                Text = "Now watching Lost Isle quest progress. Will auto-claim when complete!",
+                Duration = 4
+            }
+        end
     end
 }
 
