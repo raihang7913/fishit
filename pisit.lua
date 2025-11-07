@@ -70,6 +70,7 @@ local oldNamecall
 local oldIndex
 local instantFishingActive = false
 local catchDelayActive = false -- Track if catch delay is in progress
+local rngDetectionActive = false -- Track RNG detection
 
 -- State tracking
 local isFishing = false
@@ -523,9 +524,6 @@ task.spawn(setupRemoteListener)
 -- RNG SYSTEM DETECTOR - AUTO-DETECT FISHING RNG
 -- ═══════════════════════════════════════════════════════════════
 
-local rngDetectionActive = false
-local oldNamecallForRNG
-
 local function startRNGDetection()
     if rngDetectionActive then
         print("🎲 RNG Detection already active!")
@@ -536,132 +534,115 @@ local function startRNGDetection()
     print("🎲 [RNG DETECTOR] Starting RNG detection...")
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     
-    if not hookmetamethod or not getnamecallmethod then
-        warn("❌ hookmetamethod not available - RNG detection requires it!")
+    rngDetectionActive = true
+    print("✅ [RNG DETECTOR] Active! RNG logging enabled")
+    print("💡 Catch fish to see RNG data in console")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+end
+
+local function processRNGData(remoteName, method, args, result)
+    if not rngDetectionActive then return end
+    
+    local remoteNameLower = remoteName:lower()
+    
+    -- Only log fishing-related remotes
+    if not (remoteNameLower:find("fish") or remoteNameLower:find("catch") or 
+            remoteNameLower:find("reel") or remoteNameLower:find("loot") or
+            remoteNameLower:find("reward") or remoteNameLower:find("result")) then
         return
     end
     
-    -- Hook __namecall to intercept all remote calls
-    oldNamecallForRNG = hookmetamethod(game, "__namecall", function(self, ...)
-        local method = getnamecallmethod()
-        local args = {...}
-        
-        if method == "InvokeServer" or method == "FireServer" then
-            local remoteName = self.Name
-            local remoteNameLower = remoteName:lower()
-            
-            -- Detect fishing-related remotes
-            if remoteNameLower:find("fish") or remoteNameLower:find("catch") or 
-               remoteNameLower:find("reel") or remoteNameLower:find("loot") or
-               remoteNameLower:find("reward") or remoteNameLower:find("result") then
-                
-                -- Call original and capture result
-                local result
-                if method == "InvokeServer" then
-                    result = oldNamecallForRNG(self, ...)
-                else
-                    oldNamecallForRNG(self, ...)
-                end
-                
-                -- Log the call
-                print("\n🎣 [RNG] Remote intercepted:", remoteName)
-                print("  📞 Method:", method)
-                print("  📥 Arguments:")
-                for i, arg in ipairs(args) do
-                    print("    [" .. i .. "]", type(arg), ":", tostring(arg))
-                    if type(arg) == "table" then
-                        for k, v in pairs(arg) do
-                            print("      └─", tostring(k), ":", tostring(v))
-                        end
-                    end
-                end
-                
-                -- Analyze result (only for InvokeServer)
-                if method == "InvokeServer" and result then
-                    print("  📤 Result type:", type(result))
-                    
-                    if type(result) == "table" then
-                        print("  📤 Result table:")
-                        for k, v in pairs(result) do
-                            print("    └─", tostring(k), ":", tostring(v))
-                            
-                            -- Extract fish data
-                            local kLower = tostring(k):lower()
-                            if kLower == "fish" or kLower == "name" then
-                                RNGData.fishPool[tostring(v)] = (RNGData.fishPool[tostring(v)] or 0) + 1
-                                RNGData.totalCatches = RNGData.totalCatches + 1
-                            end
-                            
-                            -- Extract rarity
-                            if kLower == "rarity" then
-                                local rarity = tostring(v)
-                                RNGData.rarityChances[rarity] = (RNGData.rarityChances[rarity] or 0) + 1
-                            end
-                            
-                            -- Extract chance/probability
-                            if kLower == "chance" or kLower == "probability" or kLower == "rate" then
-                                print("      🎲 RNG Chance detected:", v)
-                            end
-                            
-                            -- Extract luck multiplier
-                            if kLower == "luck" or kLower == "multiplier" or kLower == "bonus" then
-                                RNGData.luckMultiplier = tonumber(v) or RNGData.luckMultiplier
-                                print("      ✨ Luck multiplier:", v)
-                            end
-                            
-                            -- Extract seed
-                            if kLower == "seed" or kLower == "random" then
-                                RNGData.currentSeed = tonumber(v) or RNGData.currentSeed
-                                print("      🌱 RNG Seed:", v)
-                            end
-                            
-                            -- Nested tables
-                            if type(v) == "table" then
-                                for k2, v2 in pairs(v) do
-                                    print("      └─", tostring(k2), ":", tostring(v2))
-                                end
-                            end
-                        end
-                    elseif type(result) == "string" then
-                        print("  📤 Result:", result)
-                        -- Track fish names
-                        RNGData.fishPool[result] = (RNGData.fishPool[result] or 0) + 1
-                        RNGData.totalCatches = RNGData.totalCatches + 1
-                    else
-                        print("  📤 Result:", tostring(result))
-                    end
-                end
-                
-                -- Store detected call
-                table.insert(RNGData.detectedCalls, {
-                    remote = remoteName,
-                    method = method,
-                    args = args,
-                    result = result,
-                    timestamp = tick()
-                })
-                
-                return result
+    -- Log the call
+    print("\n🎣 [RNG] Remote intercepted:", remoteName)
+    print("  📞 Method:", method)
+    print("  📥 Arguments:")
+    for i, arg in ipairs(args) do
+        print("    [" .. i .. "]", type(arg), ":", tostring(arg))
+        if type(arg) == "table" then
+            for k, v in pairs(arg) do
+                print("      └─", tostring(k), ":", tostring(v))
             end
         end
-        
-        return oldNamecallForRNG(self, ...)
-    end)
+    end
     
-    rngDetectionActive = true
-    print("✅ [RNG DETECTOR] Active! Catching fish to analyze RNG...")
-    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    -- Analyze result (only for InvokeServer)
+    if method == "InvokeServer" and result then
+        print("  📤 Result type:", type(result))
+        
+        if type(result) == "table" then
+            print("  📤 Result table:")
+            for k, v in pairs(result) do
+                print("    └─", tostring(k), ":", tostring(v))
+                
+                -- Extract fish data
+                local kLower = tostring(k):lower()
+                if kLower == "fish" or kLower == "name" then
+                    RNGData.fishPool[tostring(v)] = (RNGData.fishPool[tostring(v)] or 0) + 1
+                    RNGData.totalCatches = RNGData.totalCatches + 1
+                end
+                
+                -- Extract rarity
+                if kLower == "rarity" then
+                    local rarity = tostring(v)
+                    RNGData.rarityChances[rarity] = (RNGData.rarityChances[rarity] or 0) + 1
+                end
+                
+                -- Extract chance/probability
+                if kLower == "chance" or kLower == "probability" or kLower == "rate" then
+                    print("      🎲 RNG Chance detected:", v)
+                end
+                
+                -- Extract luck multiplier
+                if kLower == "luck" or kLower == "multiplier" or kLower == "bonus" then
+                    RNGData.luckMultiplier = tonumber(v) or RNGData.luckMultiplier
+                    print("      ✨ Luck multiplier:", v)
+                end
+                
+                -- Extract seed
+                if kLower == "seed" or kLower == "random" then
+                    RNGData.currentSeed = tonumber(v) or RNGData.currentSeed
+                    print("      🌱 RNG Seed:", v)
+                end
+                
+                -- Nested tables
+                if type(v) == "table" then
+                    for k2, v2 in pairs(v) do
+                        print("      └─", tostring(k2), ":", tostring(v2))
+                    end
+                end
+            end
+        elseif type(result) == "string" then
+            print("  📤 Result:", result)
+            -- Track fish names
+            RNGData.fishPool[result] = (RNGData.fishPool[result] or 0) + 1
+            RNGData.totalCatches = RNGData.totalCatches + 1
+        else
+            print("  📤 Result:", tostring(result))
+        end
+    end
+    
+    -- Store detected call
+    table.insert(RNGData.detectedCalls, {
+        remote = remoteName,
+        method = method,
+        args = args,
+        result = result,
+        timestamp = tick()
+    })
+end
+
+-- This will be called from the unified hook in enableInstantFishing
+local function handleRNGDetection(self, method, args, result)
+-- This will be called from the unified hook in enableInstantFishing
+local function handleRNGDetection(self, method, args, result)
+    if not rngDetectionActive then return end
+    processRNGData(self.Name, method, args, result)
 end
 
 local function stopRNGDetection()
     if not rngDetectionActive then
         print("🎲 RNG Detection already stopped!")
         return
-    end
-    
-    -- Restore original
-    if oldNamecallForRNG then
-        hookmetamethod(game, "__namecall", oldNamecallForRNG)
     end
     
     rngDetectionActive = false
@@ -1585,8 +1566,8 @@ local function enableInstantFishing()
             local method = getnamecallmethod()
             local args = {...}
             
-            -- Intercept fishing-related remote calls
-            if method == "FireServer" or method == "InvokeServer" then
+            -- Intercept fishing-related remote calls (Instant Fishing logic)
+            if Settings.InstantFishing and (method == "FireServer" or method == "InvokeServer") then
                 local remoteName = self.Name:lower()
                 
                 -- Intercept catch/complete remotes with delay
@@ -1682,7 +1663,15 @@ local function enableInstantFishing()
                 end
             end
             
-            return oldNamecall(self, ...)
+            -- Call original function and get result
+            local result = oldNamecall(self, ...)
+            
+            -- RNG Detection (if active) - Process AFTER getting result
+            if rngDetectionActive and (method == "InvokeServer" or method == "FireServer") then
+                handleRNGDetection(self, method, args, result)
+            end
+            
+            return result
         end)
     end)
     
