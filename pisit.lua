@@ -1950,65 +1950,137 @@ if useFallbackGUI then
         print("🔍 [DEBUG] Dumping ALL quest-related data...")
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         
-        -- Check ReplicatedStorage
-        print("\n📦 [ReplicatedStorage]")
+        -- Detect ALL quests from world boards (like Lost Isle detection)
+        print("\n🌍 [WORLD BOARDS] Scanning all quest boards...")
+        local allQuestText = {}
+        
+        for _, obj in pairs(workspace:GetDescendants()) do
+            if obj:IsA("SurfaceGui") or obj:IsA("BillboardGui") then
+                for _, textObj in pairs(obj:GetDescendants()) do
+                    if textObj:IsA("TextLabel") or textObj:IsA("TextButton") then
+                        local text = textObj.Text
+                        if text ~= "" and #text > 3 then
+                            -- Check if contains quest-related text
+                            local textLower = text:lower()
+                            if textLower:find("quest") or textLower:find("catch") or 
+                               textLower:find("progress") or textLower:find("%d+%%") or
+                               textLower:find("deep") or textLower:find("sea") or
+                               textLower:find("rare") or textLower:find("epic") or
+                               textLower:find("treasure") then
+                                
+                                table.insert(allQuestText, {
+                                    text = text,
+                                    boardPath = obj.Parent and obj.Parent:GetFullName() or "Unknown",
+                                    guiType = obj.ClassName
+                                })
+                                
+                                print("  📋", text)
+                                print("    └─ Board:", obj.Parent and obj.Parent.Name or "Unknown")
+                                print("    └─ Path:", obj.Parent and obj.Parent:GetFullName() or "Unknown")
+                                
+                                -- Check for percentage
+                                local percent = text:match("(%d+)%%")
+                                if percent then
+                                    print("    └─ Percentage:", percent .. "%")
+                                end
+                                
+                                -- Check for fraction
+                                local current, total = text:match("(%d+)/(%d+)")
+                                if current and total then
+                                    print("    └─ Progress:", current .. "/" .. total)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        
+        print("\n📊 Total quest texts found:", #allQuestText)
+        
+        -- Check ReplicatedStorage for ALL objects (not just quest-related)
+        print("\n📦 [ReplicatedStorage] ALL Values...")
+        local rsCount = 0
         for _, obj in pairs(ReplicatedStorage:GetDescendants()) do
-            local name = obj.Name:lower()
-            if name:find("quest") or name:find("progress") or name:find("deep") or name:find("sea") then
+            if obj:IsA("IntValue") or obj:IsA("NumberValue") or obj:IsA("StringValue") then
+                rsCount = rsCount + 1
                 print("  •", obj.ClassName, ":", obj:GetFullName())
                 if obj:IsA("IntValue") or obj:IsA("NumberValue") then
                     print("    └─ Value:", obj.Value)
                 elseif obj:IsA("StringValue") then
                     print("    └─ Value:", obj.Value)
                 end
+                
+                if rsCount > 50 then
+                    print("  ... (truncated, too many values)")
+                    break
+                end
             end
         end
         
-        -- Check LocalPlayer
-        print("\n👤 [LocalPlayer]")
+        -- Check LocalPlayer for ALL data
+        print("\n👤 [LocalPlayer] ALL Values...")
+        local playerCount = 0
         for _, obj in pairs(LocalPlayer:GetDescendants()) do
-            local name = obj.Name:lower()
-            if name:find("quest") or name:find("progress") or name:find("deep") or name:find("sea") then
+            if obj:IsA("IntValue") or obj:IsA("NumberValue") or obj:IsA("StringValue") then
+                playerCount = playerCount + 1
                 print("  •", obj.ClassName, ":", obj:GetFullName())
                 if obj:IsA("IntValue") or obj:IsA("NumberValue") then
                     print("    └─ Value:", obj.Value)
                 elseif obj:IsA("StringValue") then
                     print("    └─ Value:", obj.Value)
+                end
+                
+                if playerCount > 50 then
+                    print("  ... (truncated, too many values)")
+                    break
                 end
             end
         end
         
         -- Try to invoke GetQuestData
-        print("\n📞 [GetQuestData Remote]")
+        print("\n📞 [GetQuestData Remote] Calling...")
         local packages = ReplicatedStorage:FindFirstChild("Packages", true)
         if packages then
             local getQuestData = packages:FindFirstChild("GetQuestData", true)
             if getQuestData and getQuestData:IsA("RemoteFunction") then
                 pcall(function()
                     local data = getQuestData:InvokeServer()
-                    print("  • GetQuestData returned:")
+                    print("  • GetQuestData returned type:", type(data))
+                    
                     if type(data) == "table" then
+                        print("  • Table contents:")
+                        local count = 0
                         for k, v in pairs(data) do
-                            print("    • Key:", k, "| Type:", type(v))
+                            count = count + 1
+                            print("    • [" .. tostring(k) .. "] =", type(v))
+                            
                             if type(v) == "table" then
                                 for k2, v2 in pairs(v) do
-                                    print("      └─", k2, ":", v2)
+                                    print("      └─", tostring(k2), ":", tostring(v2))
                                 end
                             else
-                                print("      └─ Value:", v)
+                                print("      └─ Value:", tostring(v))
+                            end
+                            
+                            if count > 20 then
+                                print("    ... (truncated, too many entries)")
+                                break
                             end
                         end
                     else
-                        print("    • Raw value:", tostring(data))
+                        print("  • Raw value:", tostring(data))
                     end
                 end)
+            else
+                print("  ❌ GetQuestData not found or not a RemoteFunction")
             end
         end
         
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        print("✅ Debug complete! Check console output above")
+        print("✅ Debug complete! Found", #allQuestText, "quest boards")
         
-        GUI.Notification("Debug Complete", "Check console (F9) for ALL quest data!", 4)
+        GUI.Notification("Debug Complete", "Found " .. #allQuestText .. " quest boards! Check console", 4)
     end)
     
     GUI.Button("🔍 Scan Quest System", "Find all quest remotes", function()
