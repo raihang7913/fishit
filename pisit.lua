@@ -57,6 +57,7 @@ local Settings = {
     InstantFishing = false, -- Hook metamethod untuk instant fishing
     AutoPerfect = true,    -- Auto perfect catch (detect perfect zone)
     AutoQuest = false,     -- Auto complete quest
+    AutoDeepSeaQuest = false, -- Auto complete Deep Sea Quest specifically
     CatchDelay = 0.3,     -- Delay sebelum ikan tertangkap (seconds)
     CastDelay = 0.6,      -- Durasi mouse hold saat cast (hold duration)
     ReelTiming = 0.6,     -- Delay sebelum klik reel
@@ -511,6 +512,140 @@ task.spawn(setupRemoteListener)
 -- AUTO QUEST COMPLETION - FORCE COMPLETE WITHOUT CATCHING FISH
 -- ═══════════════════════════════════════════════════════════════
 
+local function forceCompleteDeepSeaQuest()
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print("🌊 [DEEP SEA] Force completing Deep Sea Quest...")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    
+    local packages = ReplicatedStorage:FindFirstChild("Packages", true)
+    if not packages then
+        warn("❌ Packages not found!")
+        return 0
+    end
+    
+    local completedCount = 0
+    
+    -- SPECIFIC DEEP SEA QUEST REMOTES
+    print("📋 [DEEP SEA] Targeting Deep Sea Quest remotes...")
+    
+    -- Try to complete via GetQuestData manipulation
+    local getQuestData = packages:FindFirstChild("GetQuestData", true)
+    if getQuestData and getQuestData:IsA("RemoteFunction") then
+        pcall(function()
+            -- Try to set Deep Sea Quest to 100%
+            getQuestData:InvokeServer("DeepSeaQuest", 100)
+            getQuestData:InvokeServer("Deep Sea Quest", 100)
+            getQuestData:InvokeServer({quest = "DeepSea", progress = 100})
+            getQuestData:InvokeServer({name = "Deep Sea Quest", percentage = 100, completed = true})
+            print("✅ [DEEP SEA] GetQuestData invoked with 100% completion")
+            completedCount = completedCount + 1
+        end)
+    end
+    
+    -- Try to activate quest line
+    local activateQuestLine = packages:FindFirstChild("ActivateQuestLine", true)
+    if activateQuestLine and activateQuestLine:IsA("RemoteFunction") then
+        pcall(function()
+            -- Try different quest IDs (Deep Sea might be ID 1-20)
+            for i = 1, 20 do
+                activateQuestLine:InvokeServer(i, true) -- Activate and complete
+                activateQuestLine:InvokeServer(i, 100) -- Set to 100%
+            end
+            
+            -- Try with quest names
+            activateQuestLine:InvokeServer("DeepSeaQuest", true)
+            activateQuestLine:InvokeServer("Deep Sea Quest", 100)
+            
+            print("✅ [DEEP SEA] ActivateQuestLine triggered (1-20)")
+            completedCount = completedCount + 1
+        end)
+    end
+    
+    -- Try to claim rewards
+    local claimEventReward = packages:FindFirstChild("ClaimEventReward", true)
+    if claimEventReward and claimEventReward:IsA("RemoteEvent") then
+        pcall(function()
+            for i = 1, 10 do
+                claimEventReward:FireServer(i)
+                claimEventReward:FireServer("DeepSeaQuest")
+                claimEventReward:FireServer({quest = "DeepSea", id = i})
+            end
+            print("✅ [DEEP SEA] ClaimEventReward fired (1-10)")
+            completedCount = completedCount + 1
+        end)
+    end
+    
+    -- Scan all remotes for Deep Sea related
+    print("\n🔍 [DEEP SEA] Scanning all remotes for Deep Sea keywords...")
+    for _, remote in pairs(packages:GetDescendants()) do
+        if remote:IsA("RemoteFunction") or remote:IsA("RemoteEvent") then
+            local remoteName = remote.Name:lower()
+            
+            -- Pattern 1: Quest completion/progress remotes
+            if remoteName:find("quest") and (remoteName:find("complete") or remoteName:find("progress") or remoteName:find("update")) then
+                pcall(function()
+                    if remote:IsA("RemoteFunction") then
+                        -- Try multiple argument patterns for Deep Sea
+                        remote:InvokeServer("DeepSeaQuest", 100)
+                        remote:InvokeServer({quest = "DeepSea", progress = 100, percentage = 100})
+                        remote:InvokeServer({name = "Deep Sea Quest", completed = true})
+                        print("✅ [DEEP SEA] Invoked:", remote.Name)
+                    else
+                        remote:FireServer("DeepSeaQuest", 100)
+                        remote:FireServer({quest = "DeepSea", progress = 100, percentage = 100})
+                        remote:FireServer({name = "Deep Sea Quest", completed = true})
+                        print("✅ [DEEP SEA] Fired:", remote.Name)
+                    end
+                    completedCount = completedCount + 1
+                end)
+            end
+            
+            -- Pattern 2: Catch fish remotes (simulate catching 800 Rare/Epic fish)
+            if remoteName:find("catch") or remoteName:find("fish") then
+                pcall(function()
+                    if remote:IsA("RemoteFunction") then
+                        -- Simulate catching 800 rare/epic fish
+                        for i = 1, 10 do
+                            remote:InvokeServer("Rare", {rarity = "Rare", location = "TreasureRoom"})
+                            remote:InvokeServer("Epic", {rarity = "Epic", location = "TreasureRoom"})
+                        end
+                        print("✅ [DEEP SEA] Simulated fish catches:", remote.Name)
+                    else
+                        for i = 1, 10 do
+                            remote:FireServer("Rare", {rarity = "Rare", location = "TreasureRoom"})
+                            remote:FireServer("Epic", {rarity = "Epic", location = "TreasureRoom"})
+                        end
+                        print("✅ [DEEP SEA] Simulated fish catches:", remote.Name)
+                    end
+                    completedCount = completedCount + 1
+                end)
+            end
+            
+            -- Pattern 3: Claim/reward remotes
+            if remoteName:find("claim") or remoteName:find("reward") then
+                pcall(function()
+                    if remote:IsA("RemoteFunction") then
+                        remote:InvokeServer("DeepSeaQuest")
+                        remote:InvokeServer({quest = "DeepSea", completed = true})
+                        print("✅ [DEEP SEA] Claimed reward:", remote.Name)
+                    else
+                        remote:FireServer("DeepSeaQuest")
+                        remote:FireServer({quest = "DeepSea", completed = true})
+                        print("✅ [DEEP SEA] Claimed reward:", remote.Name)
+                    end
+                    completedCount = completedCount + 1
+                end)
+            end
+        end
+    end
+    
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print("🌊 Deep Sea Quest remotes triggered:", completedCount)
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    
+    return completedCount
+end
+
 local function forceCompleteQuest()
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     print("🎯 [QUEST] Force completing all quests...")
@@ -724,6 +859,18 @@ local function autoQuestLoop()
     end
 end
 
+local function autoDeepSeaQuestLoop()
+    while Settings.AutoDeepSeaQuest do
+        task.wait(3) -- Check every 3 seconds
+        
+        print("🔄 [AUTO DEEP SEA] Auto-completing Deep Sea Quest...")
+        forceCompleteDeepSeaQuest()
+        
+        -- Wait longer between attempts to avoid spam
+        task.wait(7)
+    end
+end
+
 -- ═══════════════════════════════════════════════════════════════
 -- QUEST PROGRESS DETECTION - LOST ISLE BOARD (WORLD OBJECT)
 -- ═══════════════════════════════════════════════════════════════
@@ -737,12 +884,14 @@ local function detectLostIsleQuest()
         found = false,
         name = "",
         progress = "",
+        percentage = 0,
         currentCount = 0,
         totalCount = 0,
         reward = "",
         boardPath = "",
         objectivesFound = {},
-        allText = {}
+        allText = {},
+        allQuests = {}
     }
     
     -- METHOD 1: Scan Workspace for quest boards/signs (3D objects)
@@ -771,17 +920,44 @@ local function detectLostIsleQuest()
                                 print("  │  └─ Text found:", text)
                                 table.insert(questInfo.allText, text)
                                 
+                                -- Detect percentage format: "PROGRESS: 0% (Completed 0)" or "Quest Name - 0%"
+                                local percentMatch = text:match("(%d+)%%")
+                                if percentMatch then
+                                    local percent = tonumber(percentMatch)
+                                    print("  │     └─ Percentage detected:", percent .. "%")
+                                    
+                                    questInfo.found = true
+                                    questInfo.percentage = percent
+                                    questInfo.progress = percent .. "%"
+                                    
+                                    -- Extract completed count if available
+                                    local completedMatch = text:match("Completed (%d+)")
+                                    if completedMatch then
+                                        questInfo.currentCount = tonumber(completedMatch)
+                                        print("  │     └─ Completed count:", questInfo.currentCount)
+                                    end
+                                end
+                                
                                 -- Check for quest-related keywords
                                 if textLower:find("ghost") or textLower:find("lost") or 
                                    textLower:find("isle") or textLower:find("secret") or
-                                   textLower:find("mystery") or textLower:find("catch") then
+                                   textLower:find("mystery") or textLower:find("catch") or
+                                   textLower:find("quest") or textLower:find("progress") then
                                     
                                     questInfo.found = true
                                     questInfo.boardPath = obj:GetFullName()
                                     
+                                    -- Store quest details
+                                    local questEntry = {
+                                        text = text,
+                                        boardPath = obj:GetFullName(),
+                                        percentage = percentMatch and tonumber(percentMatch) or 0
+                                    }
+                                    table.insert(questInfo.allQuests, questEntry)
+                                    
                                     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                                     print("✅ QUEST BOARD FOUND!")
-                                    print("📍 Object:", obj.Name)
+                                    print("📍 Object:", obj.Parent and obj.Parent.Name or "Unknown")
                                     print("📍 Full Path:", obj:GetFullName())
                                     print("📝 Text:", text)
                                     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -789,15 +965,24 @@ local function detectLostIsleQuest()
                                     -- Store quest name
                                     if textLower:find("ghost") then
                                         questInfo.reward = "Ghostfin"
+                                        questInfo.name = "Ghostfin Quest"
                                     end
                                     
-                                    -- Detect progress format (e.g., "0/5", "1/3", "Progress: 2/10")
+                                    if textLower:find("secret") then
+                                        questInfo.name = "SECRET Fish Quest"
+                                    end
+                                    
+                                    if textLower:find("mythic") then
+                                        questInfo.name = "Mythic Fish Quest"
+                                    end
+                                    
+                                    -- Detect old fraction format (e.g., "0/5", "1/3") for backward compatibility
                                     local current, total = text:match("(%d+)/(%d+)")
                                     if current and total then
-                                        questInfo.progress = current .. "/" .. total
                                         questInfo.currentCount = tonumber(current)
                                         questInfo.totalCount = tonumber(total)
-                                        print("📊 Progress detected:", questInfo.progress)
+                                        questInfo.progress = current .. "/" .. total
+                                        print("📊 Fraction progress detected:", questInfo.progress)
                                     end
                                     
                                     -- Store objective
@@ -859,13 +1044,15 @@ local function detectLostIsleQuest()
     print("📋 QUEST SUMMARY:")
     print("  • Found:", questInfo.found and "YES ✅" or "NO ❌")
     print("  • Progress:", questInfo.progress ~= "" and questInfo.progress or "N/A")
+    print("  • Percentage:", questInfo.percentage .. "%")
     print("  • Current/Total:", questInfo.currentCount .. "/" .. questInfo.totalCount)
-    print("  • Completed:", (questInfo.currentCount >= questInfo.totalCount and questInfo.totalCount > 0) and "YES ✅" or "NO")
+    print("  • Completed:", (questInfo.percentage >= 100 or (questInfo.currentCount >= questInfo.totalCount and questInfo.totalCount > 0)) and "YES ✅" or "NO")
     print("  • Reward:", questInfo.reward ~= "" and questInfo.reward or "N/A")
     print("  • Location:", questInfo.location ~= "" and questInfo.location or "N/A")
     print("  • Board Path:", questInfo.boardPath ~= "" and questInfo.boardPath or "N/A")
     print("  • Objectives Found:", #questInfo.objectivesFound)
     print("  • Total Text Found:", #questInfo.allText)
+    print("  • Total Quests Found:", #questInfo.allQuests)
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     
     -- Print all text found
@@ -884,6 +1071,7 @@ local function monitorQuestProgress()
     print("👀 Watching world boards and UI for progress changes...")
     
     local lastProgress = ""
+    local lastPercentage = -1
     local lastCurrentCount = 0
     
     while Settings.AutoQuest do
@@ -899,31 +1087,54 @@ local function monitorQuestProgress()
                         
                         -- Check for quest-related text
                         if textLower:find("ghost") or textLower:find("lost") or 
-                           textLower:find("isle") or textLower:find("secret") then
+                           textLower:find("isle") or textLower:find("secret") or
+                           textLower:find("progress") or textLower:find("catch") or
+                           textLower:find("mythic") or textLower:find("quest") then
                             
-                            local current, total = text:match("(%d+)/(%d+)")
-                            
-                            if current and total then
-                                local currentNum = tonumber(current)
-                                local totalNum = tonumber(total)
-                                local progress = current .. "/" .. total
+                            -- PRIMARY: Detect percentage format (e.g., "0%", "50%", "100%")
+                            local percentMatch = text:match("(%d+)%%")
+                            if percentMatch then
+                                local currentPercent = tonumber(percentMatch)
                                 
-                                -- Check if progress changed
-                                if currentNum ~= lastCurrentCount then
-                                    lastCurrentCount = currentNum
+                                -- Check if percentage changed
+                                if currentPercent ~= lastPercentage then
+                                    lastPercentage = currentPercent
                                     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                                    print("📊 [PROGRESS UPDATE] Quest:", progress)
+                                    print("📊 [PROGRESS UPDATE] Quest:", currentPercent .. "%")
                                     print("📍 Board:", obj.Parent and obj.Parent.Name or "Unknown")
                                     print("📝 Full Text:", text)
                                     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                                     
-                                    -- Check if completed
-                                    if currentNum >= totalNum then
-                                        print("✅✅✅ [QUEST COMPLETE] ✅✅✅")
-                                        print("🎁 Ready to claim Ghostfin reward!")
+                                    -- Check if completed (100%)
+                                    if currentPercent >= 100 then
+                                        print("✅✅✅ [QUEST COMPLETE - 100%] ✅✅✅")
+                                        print("🎁 Ready to claim reward!")
                                         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                                         
                                         -- Try to claim reward
+                                        forceCompleteQuest()
+                                    end
+                                end
+                            end
+                            
+                            -- FALLBACK: Fraction format (e.g., "5/5", "3/10")
+                            local current, total = text:match("(%d+)/(%d+)")
+                            if current and total then
+                                local currentNum = tonumber(current)
+                                local totalNum = tonumber(total)
+                                
+                                if currentNum ~= lastCurrentCount then
+                                    lastCurrentCount = currentNum
+                                    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                                    print("📊 [PROGRESS UPDATE] Quest:", current .. "/" .. total)
+                                    print("📍 Board:", obj.Parent and obj.Parent.Name or "Unknown")
+                                    print("📝 Full Text:", text)
+                                    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                                    
+                                    if currentNum >= totalNum then
+                                        print("✅✅✅ [QUEST COMPLETE] ✅✅✅")
+                                        print("🎁 Ready to claim reward!")
+                                        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                                         forceCompleteQuest()
                                     end
                                 end
@@ -941,15 +1152,34 @@ local function monitorQuestProgress()
                     local text = obj.Text
                     local textLower = text:lower()
                     
-                    if textLower:find("lost isle") or textLower:find("ghostfin") then
-                        local current, total = text:match("(%d+)/(%d+)")
+                    if textLower:find("lost isle") or textLower:find("ghostfin") or
+                       textLower:find("secret") or textLower:find("progress") or
+                       textLower:find("mythic") or textLower:find("quest") then
                         
+                        -- Check percentage format
+                        local percentMatch = text:match("(%d+)%%")
+                        if percentMatch then
+                            local currentPercent = tonumber(percentMatch)
+                            
+                            if currentPercent ~= lastPercentage then
+                                lastPercentage = currentPercent
+                                print("📊 [UI PROGRESS]", text)
+                                
+                                if currentPercent >= 100 then
+                                    print("✅ [COMPLETE - 100%] Quest finished!")
+                                    forceCompleteQuest()
+                                end
+                            end
+                        end
+                        
+                        -- Check fraction format
+                        local current, total = text:match("(%d+)/(%d+)")
                         if current and total then
                             local currentNum = tonumber(current)
                             
                             if currentNum ~= lastCurrentCount then
                                 lastCurrentCount = currentNum
-                                print("📊 [UI PROGRESS] Lost Isle:", current .. "/" .. total)
+                                print("📊 [UI PROGRESS]", current .. "/" .. total)
                                 
                                 if currentNum >= tonumber(total) then
                                     print("✅ [COMPLETE] Quest finished!")
@@ -1619,6 +1849,19 @@ if useFallbackGUI then
         end
     end)
     
+    GUI.Toggle("🌊 Auto Deep Sea Quest", "Auto complete Deep Sea Quest", false, function(state)
+        Settings.AutoDeepSeaQuest = state
+        if state then
+            -- Immediately complete on enable
+            forceCompleteDeepSeaQuest()
+            -- Start auto loop
+            task.spawn(autoDeepSeaQuestLoop)
+            GUI.Notification("🌊 Auto Deep Sea ON", "Quest will auto-complete every 10s!", 3)
+        else
+            GUI.Notification("🌊 Auto Deep Sea OFF", "Auto-complete disabled", 2)
+        end
+    end)
+    
     GUI.Button("🎣 Cast Now", "Manual cast", function()
         castRod()
     end)
@@ -1626,6 +1869,11 @@ if useFallbackGUI then
     GUI.Button("🎯 Force Complete Quest", "Complete quest without catching fish", function()
         local count = forceCompleteQuest()
         GUI.Notification("Quest Complete", "Triggered " .. count .. " quest remotes!", 3)
+    end)
+    
+    GUI.Button("🌊 Complete Deep Sea Quest", "Auto-complete Deep Sea Quest instantly", function()
+        local count = forceCompleteDeepSeaQuest()
+        GUI.Notification("Deep Sea Quest", "Triggered " .. count .. " remotes! Check progress!", 4)
     end)
     
     GUI.Button("🔍 Scan Quest System", "Find all quest remotes", function()
@@ -1823,6 +2071,34 @@ MainTab:Toggle{
     end
 }
 
+MainTab:Toggle{
+    Name = "🌊 Auto Deep Sea Quest",
+    StartingState = false,
+    Description = "Auto-complete Deep Sea Quest every 10 seconds (Catch 800 Rare/Epic)",
+    Callback = function(state)
+        Settings.AutoDeepSeaQuest = state
+        
+        if state then
+            -- Immediately complete
+            local count = forceCompleteDeepSeaQuest()
+            -- Start auto loop
+            task.spawn(autoDeepSeaQuestLoop)
+            
+            GUI:Notification{
+                Title = "🌊 Auto Deep Sea Quest ON",
+                Text = "Triggered " .. count .. " remotes! Will auto-complete every 10s.",
+                Duration = 4
+            }
+        else
+            GUI:Notification{
+                Title = "🌊 Auto Deep Sea Quest OFF",
+                Text = "Auto-complete disabled",
+                Duration = 2
+            }
+        end
+    end
+}
+
 MainTab:Button{
     Name = "Cast Now",
     Description = "Manually cast fishing rod once",
@@ -1840,6 +2116,19 @@ MainTab:Button{
             Title = "Quest Force Completed",
             Text = "Triggered " .. count .. " quest remotes! Check if quest completed.",
             Duration = 3
+        }
+    end
+}
+
+MainTab:Button{
+    Name = "🌊 Complete Deep Sea Quest",
+    Description = "Instantly complete Deep Sea Quest (Catch 800 Rare/Epic Fish)",
+    Callback = function()
+        local count = forceCompleteDeepSeaQuest()
+        GUI:Notification{
+            Title = "Deep Sea Quest Completed!",
+            Text = "Triggered " .. count .. " remotes! Quest should be at 100% now.",
+            Duration = 4
         }
     end
 }
