@@ -525,6 +525,75 @@ local function forceCompleteDeepSeaQuest()
     
     local completedCount = 0
     
+    -- METHOD 1: Hook GetQuestData to return 100% for Deep Sea
+    print("\n🔧 [HOOK] Attempting to hook GetQuestData...")
+    local getQuestData = packages:FindFirstChild("GetQuestData", true)
+    if getQuestData and getQuestData:IsA("RemoteFunction") then
+        pcall(function()
+            local oldFunc = getQuestData.OnClientInvoke
+            
+            -- Hook the function to manipulate quest data
+            getQuestData.OnClientInvoke = function(...)
+                local result = oldFunc and oldFunc(...) or {}
+                
+                -- If result contains Deep Sea Quest, set to 100%
+                if type(result) == "table" then
+                    for questName, questData in pairs(result) do
+                        if tostring(questName):lower():find("deep") or tostring(questName):lower():find("sea") then
+                            print("🎯 [HOOK] Found Deep Sea Quest in data, setting to 100%")
+                            if type(questData) == "table" then
+                                questData.progress = 100
+                                questData.percentage = 100
+                                questData.completed = 800
+                                questData.total = 800
+                            end
+                        end
+                    end
+                end
+                
+                return result
+            end
+            
+            print("✅ [HOOK] GetQuestData hooked successfully!")
+            completedCount = completedCount + 1
+        end)
+    end
+    
+    -- METHOD 2: Scan for quest-related values in ReplicatedStorage
+    print("\n🔍 [STORAGE] Looking for quest data in ReplicatedStorage...")
+    for _, obj in pairs(ReplicatedStorage:GetDescendants()) do
+        if obj:IsA("IntValue") or obj:IsA("NumberValue") or obj:IsA("StringValue") then
+            local name = obj.Name:lower()
+            if name:find("quest") or name:find("progress") or name:find("deep") or name:find("sea") then
+                pcall(function()
+                    if obj:IsA("IntValue") or obj:IsA("NumberValue") then
+                        -- Set to max value
+                        obj.Value = 800
+                        print("✅ [STORAGE] Set value:", obj:GetFullName(), "= 800")
+                        completedCount = completedCount + 1
+                    end
+                end)
+            end
+        end
+    end
+    
+    -- METHOD 3: Check LocalPlayer data
+    print("\n🔍 [PLAYER] Looking for quest data in LocalPlayer...")
+    for _, obj in pairs(LocalPlayer:GetDescendants()) do
+        if obj:IsA("IntValue") or obj:IsA("NumberValue") or obj:IsA("StringValue") then
+            local name = obj.Name:lower()
+            if name:find("quest") or name:find("progress") or name:find("deep") or name:find("sea") then
+                pcall(function()
+                    if obj:IsA("IntValue") or obj:IsA("NumberValue") then
+                        obj.Value = 800
+                        print("✅ [PLAYER] Set value:", obj:GetFullName(), "= 800")
+                        completedCount = completedCount + 1
+                    end
+                end)
+            end
+        end
+    end
+    
     -- SPECIFIC DEEP SEA QUEST REMOTES
     print("📋 [DEEP SEA] Targeting Deep Sea Quest remotes...")
     
@@ -1876,6 +1945,72 @@ if useFallbackGUI then
         GUI.Notification("Deep Sea Quest", "Triggered " .. count .. " remotes! Check progress!", 4)
     end)
     
+    GUI.Button("🔍 Debug Quest Data", "Print ALL quest-related data to console", function()
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("🔍 [DEBUG] Dumping ALL quest-related data...")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        
+        -- Check ReplicatedStorage
+        print("\n📦 [ReplicatedStorage]")
+        for _, obj in pairs(ReplicatedStorage:GetDescendants()) do
+            local name = obj.Name:lower()
+            if name:find("quest") or name:find("progress") or name:find("deep") or name:find("sea") then
+                print("  •", obj.ClassName, ":", obj:GetFullName())
+                if obj:IsA("IntValue") or obj:IsA("NumberValue") then
+                    print("    └─ Value:", obj.Value)
+                elseif obj:IsA("StringValue") then
+                    print("    └─ Value:", obj.Value)
+                end
+            end
+        end
+        
+        -- Check LocalPlayer
+        print("\n👤 [LocalPlayer]")
+        for _, obj in pairs(LocalPlayer:GetDescendants()) do
+            local name = obj.Name:lower()
+            if name:find("quest") or name:find("progress") or name:find("deep") or name:find("sea") then
+                print("  •", obj.ClassName, ":", obj:GetFullName())
+                if obj:IsA("IntValue") or obj:IsA("NumberValue") then
+                    print("    └─ Value:", obj.Value)
+                elseif obj:IsA("StringValue") then
+                    print("    └─ Value:", obj.Value)
+                end
+            end
+        end
+        
+        -- Try to invoke GetQuestData
+        print("\n📞 [GetQuestData Remote]")
+        local packages = ReplicatedStorage:FindFirstChild("Packages", true)
+        if packages then
+            local getQuestData = packages:FindFirstChild("GetQuestData", true)
+            if getQuestData and getQuestData:IsA("RemoteFunction") then
+                pcall(function()
+                    local data = getQuestData:InvokeServer()
+                    print("  • GetQuestData returned:")
+                    if type(data) == "table" then
+                        for k, v in pairs(data) do
+                            print("    • Key:", k, "| Type:", type(v))
+                            if type(v) == "table" then
+                                for k2, v2 in pairs(v) do
+                                    print("      └─", k2, ":", v2)
+                                end
+                            else
+                                print("      └─ Value:", v)
+                            end
+                        end
+                    else
+                        print("    • Raw value:", tostring(data))
+                    end
+                end)
+            end
+        end
+        
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("✅ Debug complete! Check console output above")
+        
+        GUI.Notification("Debug Complete", "Check console (F9) for ALL quest data!", 4)
+    end)
+    
     GUI.Button("🔍 Scan Quest System", "Find all quest remotes", function()
         local remotes = scanQuestSystem()
         GUI.Notification("Quest Scan", "Found " .. #remotes .. " quest remotes (check console)", 3)
@@ -2128,6 +2263,79 @@ MainTab:Button{
         GUI:Notification{
             Title = "Deep Sea Quest Completed!",
             Text = "Triggered " .. count .. " remotes! Quest should be at 100% now.",
+            Duration = 4
+        }
+    end
+}
+
+MainTab:Button{
+    Name = "🔍 Debug Quest Data",
+    Description = "Print ALL quest data to console for debugging (F9)",
+    Callback = function()
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("🔍 [DEBUG] Dumping ALL quest-related data...")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        
+        -- Check ReplicatedStorage
+        print("\n📦 [ReplicatedStorage]")
+        for _, obj in pairs(ReplicatedStorage:GetDescendants()) do
+            local name = obj.Name:lower()
+            if name:find("quest") or name:find("progress") or name:find("deep") or name:find("sea") then
+                print("  •", obj.ClassName, ":", obj:GetFullName())
+                if obj:IsA("IntValue") or obj:IsA("NumberValue") then
+                    print("    └─ Value:", obj.Value)
+                elseif obj:IsA("StringValue") then
+                    print("    └─ Value:", obj.Value)
+                end
+            end
+        end
+        
+        -- Check LocalPlayer
+        print("\n👤 [LocalPlayer]")
+        for _, obj in pairs(LocalPlayer:GetDescendants()) do
+            local name = obj.Name:lower()
+            if name:find("quest") or name:find("progress") or name:find("deep") or name:find("sea") then
+                print("  •", obj.ClassName, ":", obj:GetFullName())
+                if obj:IsA("IntValue") or obj:IsA("NumberValue") then
+                    print("    └─ Value:", obj.Value)
+                elseif obj:IsA("StringValue") then
+                    print("    └─ Value:", obj.Value)
+                end
+            end
+        end
+        
+        -- Try to invoke GetQuestData
+        print("\n📞 [GetQuestData Remote]")
+        local packages = ReplicatedStorage:FindFirstChild("Packages", true)
+        if packages then
+            local getQuestData = packages:FindFirstChild("GetQuestData", true)
+            if getQuestData and getQuestData:IsA("RemoteFunction") then
+                pcall(function()
+                    local data = getQuestData:InvokeServer()
+                    print("  • GetQuestData returned:")
+                    if type(data) == "table" then
+                        for k, v in pairs(data) do
+                            print("    • Key:", k, "| Type:", type(v))
+                            if type(v) == "table" then
+                                for k2, v2 in pairs(v) do
+                                    print("      └─", k2, ":", v2)
+                                end
+                            else
+                                print("      └─ Value:", v)
+                            end
+                        end
+                    else
+                        print("    • Raw value:", tostring(data))
+                    end
+                end)
+            end
+        end
+        
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        
+        GUI:Notification{
+            Title = "Debug Complete",
+            Text = "Check console (F9) for complete quest data dump!",
             Duration = 4
         }
     end
